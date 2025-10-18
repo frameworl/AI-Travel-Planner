@@ -18,6 +18,33 @@
 - 开发启动：在 `client` 目录运行 `npm run dev`，访问 `http://localhost:5173/`。
 - 生产构建：`npm run build`；本地预览：`npm run preview`。
 
+## 通过 Docker 使用（面向最终用户）
+- 前提：安装 `Docker Desktop` 并确保 `docker --version` 正常。
+- 使用镜像文件（本仓库根目录提供 `ai-travel-planner-prod.tar`）：
+  - `docker load -i ai-travel-planner-prod.tar`
+  - `docker run -d -p 8080:80 --name ai-travel-planner ai-travel-planner:prod`
+  - 访问 `http://localhost:8080/`
+- 从镜像仓库拉取（如你提供仓库）：
+  - `docker pull <你的仓库>/ai-travel-planner:prod`
+  - `docker run -d -p 8080:80 --name ai-travel-planner <你的仓库>/ai-travel-planner:prod`
+- 容器常用操作：
+  - 查看状态：`docker ps --filter name=ai-travel-planner`
+  - 查看日志：`docker logs -f ai-travel-planner`
+  - 停止/删除：`docker stop ai-travel-planner`；`docker rm ai-travel-planner`
+- 生产部署建议：
+  - `docker run -d --restart unless-stopped -p 80:80 --name ai-travel-planner ai-travel-planner:prod`
+  - 端口自定义：如 `-p 3000:80`
+
+## Docker 使用说明与限制
+- 该镜像为前端 SPA 静态站点，由 Nginx 提供服务。
+- 配置在构建期烘焙到镜像，运行时通过 `-e VITE_*` 设置不会生效。
+- 未注入密钥时的默认行为：
+  - 行程生成与预算分析使用本地模拟逻辑，便于验证流程。
+  - 地图与 POI 丰富需要 `VITE_AMAP_KEY` 且高德域名白名单需包含你的访问域名（例如 `localhost:8080`）。
+- 如需启用真实功能（地图/AI/云同步）：
+  - 请使用 `Dockerfile` 通过 `--build-arg` 注入配置后重建镜像。
+  - 示例：`docker build -t ai-travel-planner:prod -f Dockerfile . --build-arg VITE_LLM_PROVIDER=dashscope --build-arg VITE_DASHSCOPE_API_KEY=sk-... --build-arg VITE_DASHSCOPE_MODEL=qwen2.5 --build-arg VITE_AMAP_KEY=你的JSAPIKey --build-arg VITE_AMAP_SECURITY_JS_CODE=... --build-arg VITE_FIREBASE_API_KEY=... --build-arg VITE_FIREBASE_AUTH_DOMAIN=... --build-arg VITE_FIREBASE_PROJECT_ID=... --build-arg VITE_FIREBASE_APP_ID=...`
+
 ## 配置说明（.env）
 - LLM 提供商：
   - `VITE_LLM_PROVIDER` = `openai` | `dashscope`（如未设置，将按密钥自动推断；都没有时使用本地模拟）
