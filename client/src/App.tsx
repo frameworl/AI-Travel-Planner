@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import './App.css'
-import { useSpeechRecognition } from './hooks/useSpeechRecognition'
 import { parseChineseTrip } from './utils/parseInput'
 import type { TripInput, Itinerary } from './types'
 import ItineraryView from './components/ItineraryView'
 import { generateItinerary } from './services/llm'
+import Map from './components/Map'
+import { useSpeechRecognition } from './hooks/useSpeechRecognition'
+import { useXfyunIat } from './hooks/useXfyunIat'
 
 function App() {
   const [input, setInput] = useState<TripInput>({
@@ -17,7 +19,15 @@ function App() {
   const [voiceText, setVoiceText] = useState('')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<Itinerary | null>(null)
-  const sr = useMemo(() => useSpeechRecognition({ lang: 'zh-CN' }), [])
+  const asrProvider = ((import.meta.env.VITE_ASR_PROVIDER as string | undefined)?.toLowerCase()) || 'web'
+  const sr = useMemo(() => {
+    if (asrProvider === 'xfyun') {
+      return useXfyunIat({ lang: 'zh_cn' })
+    }
+    return useSpeechRecognition({ lang: 'zh-CN' })
+  }, [asrProvider])
+const provider = (import.meta.env.VITE_LLM_PROVIDER as string | undefined)
+  || (import.meta.env.VITE_DASHSCOPE_API_KEY ? 'dashscope' : (import.meta.env.VITE_OPENAI_API_KEY ? 'openai' : 'mock'))
 
   useEffect(() => {
     return sr.subscribe(() => {
@@ -123,13 +133,13 @@ function App() {
           <button onClick={applyVoiceParse}>解析到表单</button>
           <button onClick={onGenerate} disabled={loading}>{loading ? '生成中...' : '生成行程'}</button>
         </div>
-        {!import.meta.env.VITE_OPENAI_API_KEY && (
-          <p style={{ marginTop: 8, color: '#6b7280' }}>
-            当前未配置 AI API Key，生成结果使用本地模拟。配置方法见 client/.env.example。
-          </p>
-        )}
+        
+        <p style={{ marginTop: 8, color: '#6b7280' }}>
+          当前 AI 提供商：{provider === 'mock' ? '本地模拟（未配置 Key）' : provider}
+        </p>
       </section>
 
+      {result && <Map data={result} />}
       {result && <ItineraryView data={result} />}
     </div>
   )

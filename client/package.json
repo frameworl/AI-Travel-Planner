@@ -10,6 +10,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@amap/amap-jsapi-loader": "^1.0.1",
+    "crypto-js": "^4.2.0",
+    "js-base64": "^3.7.8",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
   },
