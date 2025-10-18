@@ -1,0 +1,11 @@
+# Ignore dev & local artifacts
+node_modules
+client/node_modules
+client/dist
+.git
+.gitignore
+.DS_Store
+npm-debug.log*
+yarn-error.log*
+logs
+*.tar
