@@ -34,3 +34,36 @@ export interface Itinerary {
   daysPlan: ItineraryDay[]
   tips?: string[]
 }
+
+// 费用预算与管理
+export type ExpenseCategory = 'transport' | 'accommodation' | 'food' | 'tickets' | 'shopping' | 'other'
+
+export interface Expense {
+  id: string
+  day?: number // 关联行程第几天，可选
+  category: ExpenseCategory
+  amount: number
+  note?: string
+  createdAt: number
+}
+
+// AI 预算分析输出结构
+export interface BudgetAnalysisCategory {
+  category: ExpenseCategory
+  spent: number
+  suggestion: string
+}
+
+export interface BudgetAnalysisDay {
+  day: number
+  spent?: number
+  estimated?: number
+  warning?: string
+}
+
+export interface BudgetAnalysis {
+  overall: string
+  categories: BudgetAnalysisCategory[]
+  daily: BudgetAnalysisDay[]
+  tips: string[]
+}

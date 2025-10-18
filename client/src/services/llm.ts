@@ -1,4 +1,5 @@
-import type { TripInput, Itinerary, ItineraryDay, PlanItem } from '../types'
+import type { TripInput, Itinerary, ItineraryDay, PlanItem, Expense, BudgetAnalysis } from '../types'
+import { enrichItineraryWithAmap } from './amap'
 
 const OPENAI_API = 'https://api.openai.com/v1/chat/completions'
 const DASHSCOPE_API = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions'
@@ -12,23 +13,28 @@ export async function generateItinerary(input: TripInput): Promise<Itinerary> {
 
   if (provider === 'dashscope' && dsKey) {
     try {
-      return await generateItineraryDashScope(input, dsKey, dsModel)
+      const it = await generateItineraryDashScope(input, dsKey, dsModel)
+      return await enrichItineraryWithAmap(it)
     } catch (e) {
       console.warn('DashScope 调用失败，改用本地模拟', e)
-      return mockGenerateItinerary(input)
+      const it = mockGenerateItinerary(input)
+      return await enrichItineraryWithAmap(it)
     }
   }
 
   if (openaiKey) {
     try {
-      return await generateItineraryOpenAI(input, openaiKey, openaiModel)
+      const it = await generateItineraryOpenAI(input, openaiKey, openaiModel)
+      return await enrichItineraryWithAmap(it)
     } catch (e) {
       console.warn('OpenAI 调用失败，改用本地模拟', e)
-      return mockGenerateItinerary(input)
+      const it = mockGenerateItinerary(input)
+      return await enrichItineraryWithAmap(it)
     }
   }
 
-  return mockGenerateItinerary(input)
+  const it = mockGenerateItinerary(input)
+  return await enrichItineraryWithAmap(it)
 }
 
 function mockGenerateItinerary(input: TripInput): Itinerary {
@@ -161,4 +167,173 @@ async function generateItineraryDashScope(input: TripInput, apiKey: string, mode
   const data = await res.json()
   const content = data?.choices?.[0]?.message?.content
   return JSON.parse(content)
+}
+
+export async function analyzeBudget(params: { input: TripInput; itinerary?: Itinerary; expenses: Expense[] }): Promise<BudgetAnalysis> {
+  const provider = (import.meta.env.VITE_LLM_PROVIDER as string | undefined)?.toLowerCase()
+  const dsKey = import.meta.env.VITE_DASHSCOPE_API_KEY as string | undefined
+  const dsModel = (import.meta.env.VITE_DASHSCOPE_MODEL as string | undefined) || 'qwen2.5'
+  const openaiKey = import.meta.env.VITE_OPENAI_API_KEY as string | undefined
+  const openaiModel = (import.meta.env.VITE_OPENAI_MODEL as string | undefined) || 'gpt-4o-mini'
+
+  try {
+    if (provider === 'dashscope' && dsKey) {
+      return await analyzeBudgetDashScope(params, dsKey, dsModel)
+    }
+    if (openaiKey) {
+      return await analyzeBudgetOpenAI(params, openaiKey, openaiModel)
+    }
+  } catch (e) {
+    console.warn('预算AI分析调用失败，改用本地模拟', e)
+  }
+  return mockAnalyzeBudget(params)
+}
+
+function mockAnalyzeBudget({ input, itinerary, expenses }: { input: TripInput; itinerary?: Itinerary; expenses: Expense[] }): BudgetAnalysis {
+  const totalSpent = expenses.reduce((s, e) => s + (e.amount || 0), 0)
+  const byCat: Record<'transport'|'accommodation'|'food'|'tickets'|'shopping'|'other', number> = {
+    transport: 0, accommodation: 0, food: 0, tickets: 0, shopping: 0, other: 0,
+  }
+  const byDay: Record<number, number> = {}
+  for (const e of expenses) {
+    const cat = (e.category || 'other') as keyof typeof byCat
+    byCat[cat] += e.amount || 0
+    if (e.day) byDay[e.day] = (byDay[e.day] || 0) + (e.amount || 0)
+  }
+  const recRatio: Record<keyof typeof byCat, number> = {
+    transport: 0.15, accommodation: 0.4, food: 0.25, tickets: 0.1, shopping: 0.06, other: 0.04,
+  }
+  const catLabels: Record<keyof typeof byCat, string> = {
+    transport: '交通', accommodation: '住宿', food: '餐饮', tickets: '门票', shopping: '购物', other: '其他',
+  }
+
+  const categories = (Object.keys(byCat) as Array<keyof typeof byCat>).map((k) => {
+    const spent = byCat[k]
+    const rec = Math.round((input.budget || 0) * recRatio[k])
+    let suggestion = `${catLabels[k]}建议预算约 ¥${rec}；当前已用 ¥${spent}。`
+    if (spent > rec * 1.15) {
+      const over = spent - rec
+      suggestion += `已超过建议约 ¥${over}。可通过提前购票/选择高性价比店铺/优化路线减少该项支出。`
+    } else if (spent < rec * 0.6) {
+      suggestion += `低于建议区间，若行程关注度较高，可适度提高体验品质（如餐饮与景点）。`
+    } else {
+      suggestion += `处于合理区间，保持当前消费节奏即可。`
+    }
+    return { category: k, spent, suggestion }
+  })
+
+  const daily: BudgetAnalysis['daily'] = []
+  const days = itinerary?.days || Math.max( ...[0, ...Object.keys(byDay).map(Number)] ) || 0
+  for (let d = 1; d <= days; d++) {
+    const spent = byDay[d] || 0
+    const estimated = itinerary?.daysPlan?.find(x => x.day === d)?.totalEstimate || Math.round((input.budget || 0) / (itinerary?.days || days || 1))
+    let warning: string | undefined
+    if (spent > (estimated + 100)) {
+      warning = `第${d}天可能超支约 ¥${spent - estimated}，考虑减少购物/选择免费景点或更经济餐饮。`
+    } else if (spent && spent < estimated * 0.5) {
+      warning = `第${d}天支出较低，若时间允许可补充特色体验（展馆/餐厅）。`
+    }
+    daily.push({ day: d, spent, estimated, warning })
+  }
+
+  const remain = (input.budget || 0) - totalSpent
+  const perCapitaRemain = Math.round(remain / Math.max(1, input.people || 1))
+  const overall = remain >= 0
+    ? `整体剩余预算约 ¥${remain}（人均约 ¥${perCapitaRemain}）。建议保留 10%-15% 机动资金应对临时开销。`
+    : `整体已超预算约 ¥${Math.abs(remain)}。建议调整住宿/餐饮档位或减少购物开销以回到预算范围。`
+
+  const tips = [
+    '门票尽量使用官方/平台优惠并提前预约，节省排队与费用',
+    '餐饮选择本地口碑好且人均友好的店铺，避开网红溢价',
+    '交通优先公共交通，跨城/机场可提前订购享受折扣',
+  ]
+
+  return { overall, categories, daily, tips }
+}
+
+async function analyzeBudgetOpenAI({ input, itinerary, expenses }: { input: TripInput; itinerary?: Itinerary; expenses: Expense[] }, apiKey: string, model: string): Promise<BudgetAnalysis> {
+  const byCat = {
+    transport: 0, accommodation: 0, food: 0, tickets: 0, shopping: 0, other: 0,
+  }
+  const byDay: Record<number, number> = {}
+  for (const e of expenses) {
+    // @ts-ignore
+    byCat[e.category || 'other'] += e.amount || 0
+    if (e.day) byDay[e.day] = (byDay[e.day] || 0) + (e.amount || 0)
+  }
+  const dailyEstimated: Record<number, number> = {}
+  for (const d of itinerary?.daysPlan || []) {
+    if (d.day) dailyEstimated[d.day] = d.totalEstimate || 0
+  }
+
+  const system = `你是一名中文旅行预算分析助手。根据用户预算、已记录开销与每日预估，给出结构化建议。严格输出 JSON：{overall, categories: [{category, spent, suggestion}], daily: [{day, spent, estimated, warning}], tips}`
+  const user = `目的地: ${input.destination}\n天数: ${input.days}\n预算: ${input.budget}\n人数: ${input.people}\n偏好: ${input.preferences.join(', ')}\n分类支出: ${JSON.stringify(byCat)}\n每日支出: ${JSON.stringify(byDay)}\n每日预估: ${JSON.stringify(dailyEstimated)}`
+
+  const res = await fetch(OPENAI_API, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
+      temperature: 0.5,
+      response_format: { type: 'json_object' },
+    }),
+  })
+  if (!res.ok) throw new Error(await res.text())
+  const data = await res.json()
+  const content = data?.choices?.[0]?.message?.content
+  try {
+    return JSON.parse(content)
+  } catch {
+    return mockAnalyzeBudget({ input, itinerary, expenses })
+  }
+}
+
+async function analyzeBudgetDashScope({ input, itinerary, expenses }: { input: TripInput; itinerary?: Itinerary; expenses: Expense[] }, apiKey: string, model: string): Promise<BudgetAnalysis> {
+  const byCat = {
+    transport: 0, accommodation: 0, food: 0, tickets: 0, shopping: 0, other: 0,
+  }
+  const byDay: Record<number, number> = {}
+  for (const e of expenses) {
+    // @ts-ignore
+    byCat[e.category || 'other'] += e.amount || 0
+    if (e.day) byDay[e.day] = (byDay[e.day] || 0) + (e.amount || 0)
+  }
+  const dailyEstimated: Record<number, number> = {}
+  for (const d of itinerary?.daysPlan || []) {
+    if (d.day) dailyEstimated[d.day] = d.totalEstimate || 0
+  }
+
+  const system = `你是一名中文旅行预算分析助手。根据用户预算、已记录开销与每日预估，给出结构化建议。严格输出 JSON：{overall, categories: [{category, spent, suggestion}], daily: [{day, spent, estimated, warning}], tips}`
+  const user = `目的地: ${input.destination}\n天数: ${input.days}\n预算: ${input.budget}\n人数: ${input.people}\n偏好: ${input.preferences.join(', ')}\n分类支出: ${JSON.stringify(byCat)}\n每日支出: ${JSON.stringify(byDay)}\n每日预估: ${JSON.stringify(dailyEstimated)}`
+
+  const res = await fetch('https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
+      temperature: 0.5,
+    }),
+  })
+  if (!res.ok) throw new Error(await res.text())
+  const data = await res.json()
+  const content = data?.choices?.[0]?.message?.content
+  try {
+    return JSON.parse(content)
+  } catch {
+    return mockAnalyzeBudget({ input, itinerary, expenses })
+  }
 }
