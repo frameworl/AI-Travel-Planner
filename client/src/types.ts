@@ -27,6 +27,19 @@ export interface PlanItem {
   candidates?: CandidatePlace[]
 }
 
+// 新增：交通段详情
+export interface TransportSegment {
+  from: string
+  to: string
+  fromLocation?: string
+  toLocation?: string
+  mode: 'walk' | 'metro' | 'bus' | 'taxi'
+  distanceKm: number
+  timeMin: number
+  fare?: number
+  notes?: string
+}
+
 export interface ItineraryDay {
   day: number
   summary: string
@@ -37,6 +50,8 @@ export interface ItineraryDay {
   // 新增：住宿候选酒店列表（来自 LLM 结合 Amap 丰富）
   accommodationCandidates?: CandidatePlace[]
   transport?: string
+  // 新增：交通段详情列表
+  transportSegments?: TransportSegment[]
   meals?: string[]
   totalEstimate?: number
 }

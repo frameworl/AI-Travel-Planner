@@ -70,16 +70,13 @@ export default function ItineraryView({ data, expenses }: { data: Itinerary, exp
                       {it.candidates.map((c, i) => {
                         const link = buildAmapLink(c.name, c.location)
                         return (
-                          <li key={c.id || i}>
+                          <li key={i}>
                             {c.name}
-                            {c.costEstimate ? ` · 人均约 ¥${c.costEstimate}` : ''}
+                            {c.costEstimate ? ` · 约 ${c.costEstimate} 元` : ''}
                             {c.address ? ` · ${c.address}` : ''}
-                            {link && (
-                              <>
-                                {' '}
-                                <a href={link} target="_blank" rel="noopener noreferrer">在高德打开</a>
-                              </>
-                            )}
+                            {link && (<>
+                              {' · '}<a href={link} target="_blank" rel="noreferrer">在高德查看</a>
+                            </>)}
                           </li>
                         )
                       })}
@@ -89,20 +86,52 @@ export default function ItineraryView({ data, expenses }: { data: Itinerary, exp
               </li>
             ))}
           </ul>
-          <p>交通：{day.transport}；住宿：{day.accommodation}
-            {day.accommodationName && (
-              null
-            )}
-          </p>
+          {(day.transport || (day.transportSegments && day.transportSegments.length > 0)) && (
+            <div style={{ fontSize: 13, color: '#374151', marginTop: 6 }}>
+              <strong>交通：</strong> {day.transport || '根据下列段落建议选择最适方式'}
+              {day.transportSegments && day.transportSegments.length > 0 && (
+                <ul style={{ margin: '4px 0 0 16px' }}>
+                  {day.transportSegments.map((seg, i) => {
+                    const fromLink = buildAmapLink(seg.from, seg.fromLocation)
+                    const toLink = buildAmapLink(seg.to, seg.toLocation)
+                    return (
+                      <li key={i}>
+                        {seg.from} → {seg.to} · {seg.mode} · {seg.distanceKm} km · 约 {seg.timeMin} 分{seg.fare ? ` · 约 ¥${seg.fare}` : ''}{seg.notes ? ` · ${seg.notes}` : ''}
+                        {(fromLink || toLink) && (
+                          <>
+                            {' '}
+                            （{fromLink ? <a href={fromLink} target="_blank" rel="noreferrer">高德-起点</a> : ''}
+                            {fromLink && toLink ? ' / ' : ''}
+                            {toLink ? <a href={toLink} target="_blank" rel="noreferrer">高德-终点</a> : ''}）
+                          </>
+                        )}
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+            </div>
+          )}
+
+          {day.accommodation && (
+            <p>住宿：{day.accommodation}</p>
+          )}
           {day.accommodationCandidates && day.accommodationCandidates.length > 0 && (
-            <div style={{ marginTop: 4 }}>
+            <div style={{ fontSize: 13, color: '#374151', marginTop: 6 }}>
               <em>候选酒店：</em>
               <ul style={{ margin: '4px 0 0 16px' }}>
-                {day.accommodationCandidates.map((c) => (
-                  <li key={c.id}>
-                    {c.name}{typeof c.costEstimate === 'number' ? `（约¥${c.costEstimate}/晚）` : ''}
-                  </li>
-                ))}
+                {day.accommodationCandidates.map((c, i) => {
+                  const link = buildAmapLink(c.name, c.location)
+                  return (
+                    <li key={i}>
+                      {c.name}{typeof c.costEstimate === 'number' ? ` · 约 ¥${c.costEstimate}/晚` : ''}
+                      {c.address ? ` · ${c.address}` : ''}
+                      {link && (<>
+                        {' · '}<a href={link} target="_blank" rel="noreferrer">在高德查看</a>
+                      </>)}
+                    </li>
+                  )
+                })}
               </ul>
             </div>
           )}

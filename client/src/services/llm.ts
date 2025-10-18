@@ -38,68 +38,70 @@ export async function generateItinerary(input: TripInput): Promise<Itinerary> {
 }
 
 function mockGenerateItinerary(input: TripInput): Itinerary {
-  const prefs = new Set(input.preferences)
-  const daysPlan: ItineraryDay[] = []
-  const days = input.days || 5
-  const totalBudget = input.budget || 5000
+  const prefsRaw = (input.preferences || []).map(s => (s || '').toLowerCase())
+  const prefs = new Set<string>()
+  for (const p of prefsRaw) {
+    if (/美食|吃|餐厅|food/.test(p)) prefs.add('food')
+    if (/文化|历史|博物馆|museum|art/.test(p)) prefs.add('culture')
+    if (/亲子|儿童|家庭|kid|family/.test(p)) prefs.add('kids')
+    if (/购物|买|商场|shopping|mall/.test(p)) prefs.add('shopping')
+    if (/自然|户外|公园|hiking|park/.test(p)) prefs.add('relax')
+    if (/夜景|夜市|夜生活|bar|night/.test(p)) prefs.add('night')
+  }
+  const days = Math.max(input.days || 3, 1)
+  const totalBudget = Math.max(input.budget || 3000, 0)
   const dailyBudget = Math.round(totalBudget / days)
 
-  // 粗分配：住宿约占40%/天
+  // 住宿建议基础：按每日预算40%估算档位
   const perNightBudget = Math.round(dailyBudget * 0.4)
   const hotelTier = perNightBudget < 300 ? '经济型' : perNightBudget < 600 ? '舒适型' : '高端型'
-  const hotelBase = `${input.destination || '市中心'}便捷酒店（${hotelTier}，约¥${perNightBudget}/晚，评分4.4/5，近地铁/景点）`
+  const hotelBase = `${input.destination || '市中心'}便捷酒店（${hotelTier}，约¥${perNightBudget}/晚）`
 
-  const templates: Array<PlanItem[]> = [
-    [
-      { title: '市中心地标广场', location: '市中心/地铁1号线', category: 'sightseeing', timing: '09:00-11:00', costEstimate: 0, notes: '适合拍照打卡' },
-      { title: '历史博物馆', location: '文化区', category: 'culture', timing: '11:30-13:00', costEstimate: 60, notes: '典藏丰富，室内备选' },
-      { title: '老街步行街逛街', location: '商业街', category: 'shopping', timing: '14:30-16:30', costEstimate: 50, notes: '特色伴手礼' },
-      { title: '本地人气餐厅', location: '城央', category: 'food', timing: '18:00-19:30', costEstimate: 80, notes: '排队建议预约' },
-    ],
-    [
-      { title: '城市观景塔/摩天轮', location: '滨江/滨海区', category: 'sightseeing', timing: '09:00-10:30', costEstimate: 120, notes: '视野开阔' },
-      { title: '当代美术馆', location: '文化区', category: 'culture', timing: '11:00-12:30', costEstimate: 70, notes: '适合雨天' },
-      { title: '公园慢行与咖啡', location: '绿地公园', category: 'other', timing: '14:00-16:00', costEstimate: 40, notes: '亲子/放松日' },
-      { title: '特色餐厅晚餐', location: '城央/地铁沿线', category: 'food', timing: '18:30-20:00', costEstimate: 100, notes: '尝试地方菜系' },
-    ],
-    [
-      { title: '古城/寺庙文化探访', location: '历史街区', category: 'culture', timing: '09:00-11:30', costEstimate: 30, notes: '礼仪注意' },
-      { title: '亲子乐园/水族馆', location: '新城片区', category: 'kids', timing: '13:30-15:30', costEstimate: 180, notes: '适合亲子' },
-      { title: '商圈逛街', location: 'CBD商圈', category: 'shopping', timing: '16:00-17:30', costEstimate: 60, notes: '综合购物' },
-      { title: '城市夜景拍照', location: '地标周边', category: 'other', timing: '19:00-20:00', costEstimate: 0, notes: '夜景建议' },
-    ],
-    [
-      { title: '主题乐园/科技馆', location: '郊区/地铁可达', category: 'other', timing: '09:30-12:00', costEstimate: 200, notes: '预约优先' },
-      { title: '本地美食探索', location: '老城区', category: 'food', timing: '12:30-13:30', costEstimate: 80, notes: '地道口味' },
-      { title: '特色文化展馆', location: '文化区', category: 'culture', timing: '14:30-16:00', costEstimate: 60, notes: '展陈优秀' },
-      { title: '江边/海边漫步', location: '滨江/滨海区', category: 'other', timing: '18:00-19:00', costEstimate: 0, notes: '舒展放松' },
-    ],
-    [
-      { title: '自然公园/山景步道', location: '郊野/环线', category: 'other', timing: '09:00-11:30', costEstimate: 20, notes: '轻徒步' },
-      { title: '特色午餐小馆', location: '社区口碑店', category: 'food', timing: '12:00-13:00', costEstimate: 60, notes: '人均友好' },
-      { title: '博物馆深度展区', location: '文化区', category: 'culture', timing: '14:00-16:00', costEstimate: 70, notes: '深度了解城市' },
-      { title: '夜市/文创市集', location: '城央', category: 'shopping', timing: '18:30-20:00', costEstimate: 80, notes: '氛围浓厚' },
-    ],
-  ]
+  const buildItem = (title: string, category: PlanItem['category'], timing: string, location: string, cost: number, notes?: string): PlanItem => ({
+    title, category, timing, location, costEstimate: cost, notes
+  })
 
+  const daysPlan: ItineraryDay[] = []
   for (let d = 1; d <= days; d++) {
-    const tpl = templates[(d - 1) % templates.length]
-    const items: PlanItem[] = tpl.map((i) => ({
-      title: `${input.destination ? '' : ''}${i.title}`,
-      location: i.location,
-      category: i.category,
-      timing: i.timing,
-      costEstimate: i.costEstimate ?? Math.round(dailyBudget * 0.15),
-      notes: i.notes,
-    }))
+    const items: PlanItem[] = []
+    // 上午：偏好优先（亲子>文化>地标）
+    if (prefs.has('kids')) {
+      items.push(buildItem('亲子友好科技馆/动物园', 'kids', '09:00-11:30', '亲子/地铁可达', 80, '亲子优先'))
+    } else if (prefs.has('culture')) {
+      items.push(buildItem('历史博物馆/艺术馆', 'culture', '09:00-11:30', '文化区', 60, '文化偏好'))
+    } else {
+      items.push(buildItem('城市地标/公园', 'sightseeing', '09:00-11:30', '市中心/地铁', 0, '拍照打卡'))
+    }
+    // 午餐：餐饮必配，若美食偏好则提高预算
+    items.push(buildItem('本地人气餐厅', 'food', '12:00-13:30', '城央', prefs.has('food') ? 100 : 80, prefs.has('food') ? '美食优先' : '口碑店'))
+    // 下午：放松/购物/文化/热门景点
+    if (prefs.has('relax')) {
+      items.push(buildItem('城市公园/江边步道', 'relax', '14:30-16:30', '滨江/绿地', 0, '自然/散步'))
+    } else if (prefs.has('shopping')) {
+      items.push(buildItem('老街步行街/商场', 'shopping', '14:30-16:30', '商业街', 50, '伴手礼/逛街'))
+    } else if (prefs.has('culture')) {
+      items.push(buildItem('特色历史街区', 'culture', '14:30-16:30', '文化街区', 30, '人文体验'))
+    } else {
+      items.push(buildItem('热门景点', 'sightseeing', '14:30-16:30', '热门商圈', 30, '人气打卡'))
+    }
+    // 晚餐/夜间：夜市或餐厅
+    if (prefs.has('night')) {
+      items.push(buildItem('夜市/夜景漫步', 'food', '18:30-20:30', '夜市/江边夜景', prefs.has('food') ? 100 : 80, '夜生活'))
+    } else {
+      items.push(buildItem('特色餐厅/当地美食', 'food', '18:00-19:30', '吃货区/口碑好', prefs.has('food') ? 120 : 90, '预约/口碑'))
+    }
+
+    // 交通偏好摘要：预算低倾向公交地铁，预算高适度打车
+    const transport = dailyBudget <= 400 ? '公交+地铁优先，步行为辅' : (d % 2 === 0 ? '地铁+步行' : '打车+步行')
+    const meals = ['早餐：附近面包店或豆浆店', '午餐：本地口碑餐馆', '晚餐：特色餐厅或夜市']
 
     daysPlan.push({
       day: d,
-      summary: `${input.destination || '目的地'} 第 ${d} 天行程：特色景点+美食+轻松节奏`,
+      summary: `${input.destination || '目的地'} 第 ${d} 天：${(Array.from(prefs).join('、') || '经典路线')}优先，节奏舒适`,
       items,
       accommodation: `推荐酒店：${hotelBase}`,
-      transport: d % 2 === 0 ? '地铁+步行' : '公交+步行',
-      meals: ['早餐：面包店或便利店', '午餐：本地餐馆', '晚餐：特色餐厅'],
+      transport,
+      meals,
       totalEstimate: dailyBudget,
     })
   }

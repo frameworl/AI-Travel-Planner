@@ -1,6 +1,6 @@
 // amap.ts - Enhance itinerary with Amap (Gaode) POIs
 
-import type { Itinerary, ItineraryDay as PlanDay, PlanItem } from '../types';
+import type { Itinerary, ItineraryDay as PlanDay, PlanItem, TransportSegment } from '../types';
 
 export type AMapPoi = {
   id: string;
@@ -63,7 +63,7 @@ export function deriveKeywords(item: PlanItem): string[] {
   const s = `${item.title || ''} ${item.description || ''} ${item.location || ''}`.trim();
   const ks: string[] = [];
   // 优先关键字
-  const hotelHints = ['酒店', '宾馆', '旅舍', '客栈', '青年旅舍', '精品酒店', '商务酒店'];
+  const hotelHints = ['酒店', '宾馆', '旅舍', '客栈', '青年旅舍', '商务酒店', '精品酒店'];
   const poiHints = ['景点', '博物馆', '美食', '餐厅', '地标', '购物'];
   if (hotelHints.some(h => s.includes(h))) ks.push(...hotelHints);
   if (poiHints.some(h => s.includes(h))) ks.push(...poiHints);
@@ -298,6 +298,7 @@ export async function enrichItineraryWithAmap(it: Itinerary): Promise<Itinerary>
   if (!key) return it; // 无 key 时直接返回原计划
 
   const perNightBudget = computePerNightBudget(it);
+  const dailyBudget = Math.round((it.budget || 0) / Math.max(it.days || 1, 1));
 
   const newDays: PlanDay[] = [];
   for (const day of it.daysPlan) {
@@ -422,13 +423,15 @@ export async function enrichItineraryWithAmap(it: Itinerary): Promise<Itinerary>
       ? `城市内交通：总距离约 ${transportEst.distanceKm} km，估算打车合计约 ¥${transportEst.fare}（价格来源：估算）`
       : (day.transport || '城市内交通：暂无估算（待地点具体化）')
 
-    // 更新当日总估算：在原有基础上加上交通与可能的住宿最低价（若原本未计）
-    const baseDaily = (day.totalEstimate && day.totalEstimate > 0)
-      ? day.totalEstimate
-      : Math.round(((it.budget || 0) / Math.max(it.days || 1, 1)) || 0)
-    const dailyPlus = baseDaily + (transportEst.fare || 0) + (accCost || 0)
+    // 新增：生成交通段详情列表（基于距离与预算的启发式）
+    const segments = computeTransportSegments(newItems, dailyBudget)
 
-    newDays.push({ ...day, items: newItems, accommodation: newAcc, accommodationName: accName, accommodationCandidates: accCandidates, transport: transportText, totalEstimate: dailyPlus });
+    // 更新当日总估算：以“实际项目+交通+住宿最低价”为准，避免预算/天重复计入
+    const itemsSum = newItems.reduce((sum, it) => sum + (it.costEstimate || 0), 0)
+    const accDaily = (accCost != null) ? accCost : perNightBudget
+    const dailyEstimate = Math.max(0, Math.round(itemsSum + (transportEst.fare || 0) + (accDaily || 0)))
+
+    newDays.push({ ...day, items: newItems, accommodation: newAcc, accommodationName: accName, accommodationCandidates: accCandidates, transport: transportText, transportSegments: segments, totalEstimate: dailyEstimate });
   }
 
   return { ...it, daysPlan: newDays };
@@ -484,6 +487,56 @@ function computeDayTransportEstimate(items: PlanItem[]): { distanceKm: number; f
   }
   totalKm = Math.round(totalKm * 10) / 10
   return { distanceKm: totalKm, fare: Math.round(totalFare) }
+}
+
+// 新增：按两两相邻项目生成交通段详情
+function computeTransportSegments(items: PlanItem[], dailyBudget: number): TransportSegment[] {
+  const segments: TransportSegment[] = []
+  const coords: { idx: number; title: string; loc?: [number, number]; raw?: string }[] = items.map((it, idx) => ({
+    idx,
+    title: it.title,
+    loc: parseLonLat(it.location) || undefined,
+    raw: it.location,
+  }))
+  for (let i = 0; i < coords.length - 1; i++) {
+    const a = coords[i]
+    const b = coords[i + 1]
+    if (!a.loc || !b.loc) continue
+    const d = haversineKm(a.loc, b.loc)
+    let mode: TransportSegment['mode']
+    let timeMin = 0
+    let fare: number | undefined
+    let notes: string | undefined
+    const budgetLow = dailyBudget <= 400
+    const hasMetroHint = (a.raw || '')?.includes('地铁') || (b.raw || '')?.includes('地铁')
+    if (d <= 1.5) {
+      mode = 'walk'
+      timeMin = Math.round(d * 14)
+      notes = '距离较近，建议步行'
+    } else if (d <= 6) {
+      mode = hasMetroHint ? 'metro' : 'bus'
+      timeMin = Math.round(d / 18 * 60 + 10) // 城内平均速度+候车换乘
+      fare = mode === 'metro' ? Math.max(4, Math.round(4 + d / 10)) : 3
+      notes = mode === 'metro' ? '优先地铁，稳定准时' : '公交更经济'
+    } else {
+      mode = budgetLow ? (hasMetroHint ? 'metro' : 'bus') : 'taxi'
+      timeMin = Math.round(d / 24 * 60 + (mode === 'taxi' ? 4 : 12))
+      fare = mode === 'taxi' ? Math.round(estimateTaxiFare(d)) : (mode === 'metro' ? Math.max(4, Math.round(4 + d / 10)) : 4)
+      notes = mode === 'taxi' ? '距离较远，打车更省时' : '预算优先，公共交通更划算'
+    }
+    segments.push({
+      from: a.title,
+      to: b.title,
+      fromLocation: a.raw,
+      toLocation: b.raw,
+      mode,
+      distanceKm: Math.round(d * 10) / 10,
+      timeMin,
+      fare,
+      notes,
+    })
+  }
+  return segments
 }
 
 // 新增：引入 LLM 酒店推荐服务（避免循环依赖）
