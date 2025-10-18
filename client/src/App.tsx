@@ -8,8 +8,9 @@ import Map from './components/Map'
 import { useSpeechRecognition } from './hooks/useSpeechRecognition'
 import { useXfyunIat } from './hooks/useXfyunIat'
 import { parseChineseExpense, aggregateExpenses } from './utils/expenses'
-import { initAuth, onAuthStateChanged, signIn, signUp, signOut } from './services/auth'
+import { initAuth, onAuthStateChanged, /* signIn, signUp,*/ signOut } from './services/auth'
 import { initCloud, savePlan, listPlans, loadPlan, updatePlanExpenses, type PlanMeta } from './services/cloud'
+import { useNavigate } from 'react-router-dom'
 
 function App() {
   const [input, setInput] = useState<TripInput>({
@@ -30,12 +31,13 @@ function App() {
   const [user, setUser] = useState<{ uid: string; email: string | null } | null>(null)
   const [plans, setPlans] = useState<PlanMeta[]>([])
   const [currentPlanId, setCurrentPlanId] = useState<string | null>(null)
-  const [authEmail, setAuthEmail] = useState('')
-  const [authPassword, setAuthPassword] = useState('')
-  const [authLoading, setAuthLoading] = useState(false)
+  // 移除登录输入状态，改为在独立页面处理
+  // const [authEmail, setAuthEmail] = useState('')
+  // const [authPassword, setAuthPassword] = useState('')
+  // const [authLoading, setAuthLoading] = useState(false)
   const [cloudLoading, setCloudLoading] = useState(false)
-  // 新增：认证错误提示
-  const [authError, setAuthError] = useState<string | null>(null)
+  // const [authError, setAuthError] = useState<string | null>(null)
+  const navigate = useNavigate()
   const [expInput, setExpInput] = useState('')
   const [expDay, setExpDay] = useState<number | undefined>(undefined)
   const [expCategory, setExpCategory] = useState<ExpenseCategory>('other')
@@ -48,9 +50,9 @@ function App() {
   const [activeDay, setActiveDay] = useState<number>(1)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const asrProvider = ((import.meta.env.VITE_ASR_PROVIDER as string | undefined)?.toLowerCase()) || 'web'
-  // 认证输入校验：邮箱格式与密码长度
-  const isEmailValid = useMemo(() => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(authEmail), [authEmail])
-  const canAuth = isEmailValid && (authPassword?.length || 0) >= 6
+  // 移除登录校验常量
+  // const isEmailValid = useMemo(() => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(authEmail), [authEmail])
+  // const canAuth = isEmailValid && (authPassword?.length || 0) >= 6
   const sr = useMemo(() => {
     if (asrProvider === 'xfyun') {
       return useXfyunIat({ lang: 'zh_cn' })
@@ -193,10 +195,12 @@ function App() {
       } else {
         setPlans([])
         setCurrentPlanId(null)
+        // 未登录，跳转到登录页
+        navigate('/login', { replace: true })
       }
     })
     return () => { unsub && unsub() }
-  }, [])
+  }, [navigate])
 
   async function saveCurrentPlan() {
     if (!user || !result) { alert('请先登录并生成行程'); return }
@@ -239,35 +243,28 @@ function App() {
   }, [expenses, user, currentPlanId])
 
   return (
-    <div style={{ padding: 16 }}>
+    <div className="container">
       <h1>智能旅行规划</h1>
-      <div style={{ margin: '12px 0', padding: 12, border: '1px solid #e5e7eb', borderRadius: 8 }}>
+      <div className="section">
         <strong>用户管理与云同步</strong>
         {!user ? (
-          <div style={{ display: 'grid', gap: 8, gridTemplateColumns: '1fr 1fr 1fr' }}>
-            <input placeholder="邮箱" value={authEmail} onChange={(e) => { setAuthEmail(e.target.value); setAuthError(null) }} />
-            <input placeholder="密码" type="password" value={authPassword} onChange={(e) => { setAuthPassword(e.target.value); setAuthError(null) }} />
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button disabled={authLoading || !canAuth} onClick={async () => { setAuthLoading(true); try { await signUp(authEmail, authPassword); setAuthError(null) } catch (e) { const msg = (e as Error)?.message || '注册失败'; setAuthError(msg) } finally { setAuthLoading(false) } }}>注册</button>
-              <button disabled={authLoading || !canAuth} onClick={async () => { setAuthLoading(true); try { await signIn(authEmail, authPassword); setAuthError(null) } catch (e) { const msg = (e as Error)?.message || '登录失败'; setAuthError(msg) } finally { setAuthLoading(false) } }}>登录</button>
-            </div>
-            {authError && (
-              <div style={{ gridColumn: '1 / span 3', color: '#dc2626' }}>{authError}</div>
-            )}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+            <div style={{ color: '#6b7280' }}>请先登录以使用云同步与保存功能</div>
+            <button className="btn btn-primary" onClick={() => navigate('/login')}>前往登录页面</button>
           </div>
         ) : (
           <div style={{ display: 'grid', gap: 8, gridTemplateColumns: '1fr 1fr' }}>
             <div>当前用户：{user.email || user.uid}</div>
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <button onClick={() => { signOut(); setAuthError(null) }}>退出登录</button>
-              <button onClick={async () => { setCloudLoading(true); try { const list = await listPlans(); setPlans(list) } finally { setCloudLoading(false) } }} disabled={cloudLoading}>{cloudLoading ? '刷新中...' : '刷新云端计划'}</button>
-              <button onClick={saveCurrentPlan} disabled={cloudLoading || !result}>{cloudLoading ? '保存中...' : '保存当前行程到云端'}</button>
+            <div className="toolbar" style={{ justifyContent: 'flex-end' }}>
+              <button className="btn btn-outline" onClick={() => { signOut() }}>退出登录</button>
+              <button className="btn btn-outline" onClick={async () => { setCloudLoading(true); try { const list = await listPlans(); setPlans(list) } finally { setCloudLoading(false) } }} disabled={cloudLoading}>{cloudLoading ? '刷新中...' : '刷新云端计划'}</button>
+              <button className="btn btn-primary" onClick={saveCurrentPlan} disabled={cloudLoading || !result}>{cloudLoading ? '保存中...' : '保存当前行程到云端'}</button>
             </div>
             <div style={{ gridColumn: '1 / span 2' }}>
-              <label>我的计划</label>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
+              <label className="label">我的计划</label>
+              <div className="toolbar" style={{ marginTop: 6 }}>
                 {plans.map(p => (
-                  <button key={p.id} onClick={() => loadPlanById(p.id)} style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid #d1d5db', background: '#fff', cursor: 'pointer' }}>
+                  <button className="btn btn-outline" key={p.id} onClick={() => loadPlanById(p.id)}>
                     {p.title}
                   </button>
                 ))}
@@ -276,26 +273,27 @@ function App() {
           </div>
         )}
       </div>
-      <section style={{ display: 'grid', gap: 12, gridTemplateColumns: '1fr 1fr' }}>
+      <section className="grid-2">
         <div>
-          <label>目的地</label>
-          <input value={input.destination} onChange={(e) => setInput({ ...input, destination: e.target.value })} placeholder="例如：上海" />
+          <label className="label">目的地</label>
+          <input className="input" value={input.destination} onChange={(e) => setInput({ ...input, destination: e.target.value })} placeholder="例如：上海" />
         </div>
         <div>
-          <label>出行天数</label>
-          <input type="number" value={input.days} onChange={(e) => setInput({ ...input, days: Number(e.target.value) })} />
+          <label className="label">出行天数</label>
+          <input className="input" type="number" value={input.days} onChange={(e) => setInput({ ...input, days: Number(e.target.value) })} />
         </div>
         <div>
-          <label>总预算（人民币）</label>
-          <input type="number" value={input.budget} onChange={(e) => setInput({ ...input, budget: Number(e.target.value) })} />
+          <label className="label">总预算（人民币）</label>
+          <input className="input" type="number" value={input.budget} onChange={(e) => setInput({ ...input, budget: Number(e.target.value) })} />
         </div>
         <div>
-          <label>人数</label>
-          <input type="number" value={input.people} onChange={(e) => setInput({ ...input, people: Number(e.target.value) })} />
+          <label className="label">人数</label>
+          <input className="input" type="number" value={input.people} onChange={(e) => setInput({ ...input, people: Number(e.target.value) })} />
         </div>
         <div style={{ gridColumn: '1 / span 2' }}>
-          <label>偏好（用逗号分隔，如：美食,动漫,亲子）</label>
+          <label className="label">偏好（用逗号分隔，如：美食,动漫,亲子）</label>
           <input
+            className="input"
             value={input.preferences.join(', ')}
             onChange={(e) => setInput({ ...input, preferences: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })}
             placeholder="例如：美食,文化,亲子"
@@ -303,24 +301,28 @@ function App() {
         </div>
         <div style={{ gridColumn: '1 / span 2' }}>
           {/* 新增：语音识别控制 */}
-          <button onClick={() => sr.start()} disabled={asrListening}>开始语音识别</button>
-          <button onClick={() => sr.stop()} disabled={!asrListening} style={{ marginLeft: 8 }}>停止语音识别</button>
-          <span style={{ marginLeft: 12 }}>
-            识别引擎：{asrProvider === 'xfyun' ? '科大讯飞' : '浏览器 Web Speech'}
-          </span>
-          <span style={{ marginLeft: 12, color: asrListening ? '#16a34a' : '#64748b' }}>
-            语音状态：{asrListening ? '监听中' : '已停止'}{asrError ? `（错误：${asrError}）` : ''}
-          </span>
+          <div className="toolbar">
+            <button className="btn btn-outline" onClick={() => sr.start()} disabled={asrListening}>开始语音识别</button>
+            <button className="btn btn-outline" onClick={() => sr.stop()} disabled={!asrListening}>停止语音识别</button>
+            <span style={{ marginLeft: 12 }}>
+              识别引擎：{asrProvider === 'xfyun' ? '科大讯飞' : '浏览器 Web Speech'}
+            </span>
+            <span style={{ marginLeft: 12, color: asrListening ? '#16a34a' : '#64748b' }}>
+              语音状态：{asrListening ? '监听中' : '已停止'}{asrError ? `（错误：${asrError}）` : ''}
+            </span>
+          </div>
           {voiceText && (
             <div style={{ marginTop: 8, color: '#374151' }}>识别文本：{voiceText}</div>
           )}
         </div>
         <div style={{ gridColumn: '1 / span 2' }}>
-          <button onClick={applyVoiceParse} disabled={!voiceText}>将语音解析填充到表单</button>
-          <button onClick={onGenerate} disabled={loading} style={{ marginLeft: 8 }}>{loading ? '生成中...' : '生成行程'}</button>
-          <span style={{ marginLeft: 12, color: '#64748b' }}>
-            大模型引擎：{provider === 'dashscope' ? 'DashScope' : provider === 'openai' ? 'OpenAI' : '本地示例'}
-          </span>
+          <div className="toolbar">
+            <button className="btn btn-outline" onClick={applyVoiceParse} disabled={!voiceText}>将语音解析填充到表单</button>
+            <button className="btn btn-primary" onClick={onGenerate} disabled={loading}>{loading ? '生成中...' : '生成行程'}</button>
+            <span style={{ marginLeft: 12, color: '#64748b' }}>
+              大模型引擎：{provider === 'dashscope' ? 'DashScope' : provider === 'openai' ? 'OpenAI' : '本地示例'}
+            </span>
+          </div>
         </div>
       </section>
 
