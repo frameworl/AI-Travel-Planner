@@ -295,6 +295,113 @@ async function analyzeBudgetOpenAI({ input, itinerary, expenses }: { input: Trip
   }
 }
 
+export async function generateItineraryText({ input, itinerary }: { input: TripInput; itinerary?: Itinerary }): Promise<string> {
+  const provider = (import.meta.env.VITE_LLM_PROVIDER as string | undefined)?.toLowerCase()
+  const dsKey = import.meta.env.VITE_DASHSCOPE_API_KEY as string | undefined
+  const dsModel = (import.meta.env.VITE_DASHSCOPE_MODEL as string | undefined) || 'qwen2.5'
+  const openaiKey = import.meta.env.VITE_OPENAI_API_KEY as string | undefined
+  const openaiModel = (import.meta.env.VITE_OPENAI_MODEL as string | undefined) || 'gpt-4o-mini'
+
+  try {
+    if (provider === 'dashscope' && dsKey) {
+      return await generateItineraryTextDashScope({ input, itinerary }, dsKey, dsModel)
+    }
+    if (openaiKey) {
+      return await generateItineraryTextOpenAI({ input, itinerary }, openaiKey, openaiModel)
+    }
+  } catch (e) {
+    console.warn('生成详细行程文本失败，降级使用本地模拟', e)
+  }
+  return mockGenerateItineraryText({ input, itinerary })
+}
+
+function mockGenerateItineraryText({ input, itinerary }: { input: TripInput; itinerary?: Itinerary }): string {
+  const lines: string[] = []
+  lines.push(`【行程概览】目的地：${input.destination}；天数：${input.days}；人数：${input.people}；预算：¥${input.budget}`)
+  if (input.preferences?.length) {
+    lines.push(`偏好：${input.preferences.join('、')}`)
+  }
+  for (const d of itinerary?.daysPlan || []) {
+    lines.push(`\n第${d.day}天｜预算约 ¥${d.totalEstimate}`)
+    lines.push(`上午：${d.items?.[0]?.title ?? '城市地标'}（${d.items?.[0]?.location ?? '市中心/地铁可达'}）`)
+    if (d.items?.[1]) lines.push(`中午：${d.items[1].title}（餐饮/当地口碑店）`)
+    if (d.items?.[2]) lines.push(`下午：${d.items[2].title}（${d.items[2].category ?? '体验'}）`)
+    if (d.items?.[3]) lines.push(`晚上：${d.items[3].title}（拍照/漫步/夜景）`)
+    if (d.accommodation) lines.push(`住宿：${d.accommodation}`)
+    if (d.transport) lines.push(`交通：${d.transport}`)
+    if (d.meals?.length) lines.push(`餐饮：${d.meals.join('；')}`)
+    if (d.summary) lines.push(`备注：${d.summary}`)
+  }
+  if (itinerary?.tips?.length) {
+    lines.push(`\n【贴士】${itinerary.tips.join('；')}`)
+  }
+  return lines.join('\n')
+}
+
+async function generateItineraryTextOpenAI({ input, itinerary }: { input: TripInput; itinerary?: Itinerary }, apiKey: string, model: string): Promise<string> {
+  const system = `你是一名中文旅行规划专家。请输出「更详细的中文行程文本」，要求：
+- 逐日安排（早/午/晚），具体到真实/常见 POI 名称、交通方式（地铁/步行/公交/打车）、时间段、餐饮建议、住宿建议及预算提示
+- 融合已提供的结构化行程信息并具体化（如有）
+- 语气友好实用，便于直接照着玩；仅输出纯文本，不要 JSON 或代码块`
+  const user = `基础信息：
+目的地: ${input.destination}
+天数: ${input.days}
+预算: ${input.budget}
+人数: ${input.people}
+偏好: ${input.preferences.join(', ')}
+
+结构化行程（如有）:
+${itinerary ? JSON.stringify(itinerary) : '无'}`
+
+  const res = await fetch(OPENAI_API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
+      temperature: 0.7,
+    }),
+  })
+  if (!res.ok) throw new Error(await res.text())
+  const data = await res.json()
+  return data?.choices?.[0]?.message?.content || ''
+}
+
+async function generateItineraryTextDashScope({ input, itinerary }: { input: TripInput; itinerary?: Itinerary }, apiKey: string, model: string): Promise<string> {
+  const system = `你是一名中文旅行规划专家。请输出「更详细的中文行程文本」，要求：
+- 逐日安排（早/午/晚），具体到真实/常见 POI 名称、交通方式（地铁/步行/公交/打车）、时间段、餐饮建议、住宿建议及预算提示
+- 融合已提供的结构化行程信息并具体化（如有）
+- 语气友好实用，便于直接照着玩；仅输出纯文本，不要 JSON 或代码块`
+  const user = `基础信息：
+目的地: ${input.destination}
+天数: ${input.days}
+预算: ${input.budget}
+人数: ${input.people}
+偏好: ${input.preferences.join(', ')}
+
+结构化行程（如有）:
+${itinerary ? JSON.stringify(itinerary) : '无'}`
+
+  const res = await fetch(DASHSCOPE_API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
+      temperature: 0.7,
+    }),
+  })
+  if (!res.ok) throw new Error(await res.text())
+  const data = await res.json()
+  return data?.choices?.[0]?.message?.content || ''
+}
+
 async function analyzeBudgetDashScope({ input, itinerary, expenses }: { input: TripInput; itinerary?: Itinerary; expenses: Expense[] }, apiKey: string, model: string): Promise<BudgetAnalysis> {
   const byCat = {
     transport: 0, accommodation: 0, food: 0, tickets: 0, shopping: 0, other: 0,

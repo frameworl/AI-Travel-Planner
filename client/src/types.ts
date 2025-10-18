@@ -7,6 +7,15 @@ export interface TripInput {
   startDate?: string
 }
 
+export interface CandidatePlace {
+  id: string
+  name: string
+  location?: string
+  address?: string
+  tel?: string
+  costEstimate?: number
+}
+
 export interface PlanItem {
   title: string
   location?: string
@@ -14,6 +23,8 @@ export interface PlanItem {
   timing?: string
   costEstimate?: number
   notes?: string
+  description?: string
+  candidates?: CandidatePlace[]
 }
 
 export interface ItineraryDay {
@@ -21,6 +32,10 @@ export interface ItineraryDay {
   summary: string
   items: PlanItem[]
   accommodation?: string
+  // 新增：住宿酒店名称，便于外部链接与检索
+  accommodationName?: string
+  // 新增：住宿候选酒店列表（来自 LLM 结合 Amap 丰富）
+  accommodationCandidates?: CandidatePlace[]
   transport?: string
   meals?: string[]
   totalEstimate?: number

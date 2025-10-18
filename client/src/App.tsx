@@ -3,7 +3,7 @@ import './App.css'
 import { parseChineseTrip } from './utils/parseInput'
 import type { TripInput, Itinerary, Expense, ExpenseCategory, BudgetAnalysis } from './types'
 import ItineraryView from './components/ItineraryView'
-import { generateItinerary, analyzeBudget } from './services/llm'
+import { generateItinerary, analyzeBudget, generateItineraryText } from './services/llm'
 import Map from './components/Map'
 import { useSpeechRecognition } from './hooks/useSpeechRecognition'
 import { useXfyunIat } from './hooks/useXfyunIat'
@@ -32,6 +32,9 @@ function App() {
   // 新增：AI 预算分析状态
   const [analysis, setAnalysis] = useState<BudgetAnalysis | null>(null)
   const [analysisLoading, setAnalysisLoading] = useState(false)
+  const [llmText, setLlmText] = useState<string>('')
+  const [activeDay, setActiveDay] = useState<number>(1)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const asrProvider = ((import.meta.env.VITE_ASR_PROVIDER as string | undefined)?.toLowerCase()) || 'web'
   const sr = useMemo(() => {
     if (asrProvider === 'xfyun') {
@@ -49,6 +52,12 @@ function App() {
       setAsrError(sr.state.error)
     })
   }, [sr])
+  // 初次生成结果后，默认选中第1日
+  useEffect(() => {
+    if (result?.daysPlan?.length) {
+      setActiveDay(result.daysPlan[0].day)
+    }
+  }, [result])
 
   // 开发预览自动生成：支持通过 URL 参数触发
   // 用法示例：/ ?auto=1&destination=上海&days=3&budget=6000&people=2&preferences=美食,文化
@@ -95,6 +104,13 @@ function App() {
     try {
       const data = await generateItinerary(input)
       setResult(data)
+      try {
+        const text = await generateItineraryText({ input, itinerary: data })
+        setLlmText(text)
+      } catch (e) {
+        console.warn('生成详细行程文本失败', e)
+        setLlmText('')
+      }
     } catch (e) {
       alert('生成失败，请稍后重试')
       console.warn(e)
@@ -191,108 +207,145 @@ function App() {
         <div style={{ gridColumn: '1 / span 2' }}>
           <button onClick={applyVoiceParse} disabled={!voiceText}>将语音解析填充到表单</button>
           <button onClick={onGenerate} disabled={loading} style={{ marginLeft: 8 }}>{loading ? '生成中...' : '生成行程'}</button>
+          <span style={{ marginLeft: 12, color: '#64748b' }}>
+            大模型引擎：{provider === 'dashscope' ? 'DashScope' : provider === 'openai' ? 'OpenAI' : '本地示例'}
+          </span>
         </div>
       </section>
 
       {result && (
-        <section style={{ marginTop: 24, borderTop: '1px solid #e5e7eb', paddingTop: 16 }}>
-          <h2>费用预算与管理</h2>
-          <div style={{ display: 'grid', gap: 12, gridTemplateColumns: '1fr 1fr' }}>
-            <div>
-              <label>快速录入（中文，如：午餐 120 元 第2天）</label>
-              <input value={expInput} onChange={(e) => setExpInput(e.target.value)} placeholder="示例：晚餐 85 元 第1天" />
-              <button onClick={addExpenseFromText} style={{ marginTop: 8 }}>解析并记录</button>
+        <section style={{ marginTop: 24, display: 'grid', gap: 12, gridTemplateColumns: sidebarCollapsed ? '1fr' : '2fr 1fr' }}>
+          <div style={{ gridColumn: '1 / span 2', display: 'flex', justifyContent: 'flex-end' }}>
+            <button
+              onClick={() => setSidebarCollapsed(v => !v)}
+              style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid #d1d5db', background: '#fff', cursor: 'pointer' }}
+            >
+              {sidebarCollapsed ? '展开侧栏' : '折叠侧栏'}
+            </button>
+          </div>
+          <div>
+            <Map data={result} activeDay={activeDay} />
+          </div>
+          {!sidebarCollapsed && (
+          <aside style={{ borderLeft: '1px solid #e5e7eb', paddingLeft: 12 }}>
+            <div style={{ marginBottom: 12 }}>
+              <strong>日切换</strong>
+              <div style={{ marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {result.daysPlan.map((d) => (
+                  <button
+                    key={d.day}
+                    onClick={() => setActiveDay(d.day)}
+                    style={{
+                      padding: '4px 8px',
+                      borderRadius: 6,
+                      border: '1px solid #d1d5db',
+                      background: activeDay === d.day ? '#2563eb' : '#fff',
+                      color: activeDay === d.day ? '#fff' : '#111827',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    第{d.day}天
+                  </button>
+                ))}
+              </div>
             </div>
+
             <div>
-              <label>手动录入</label>
-              <div style={{ display: 'grid', gap: 8, gridTemplateColumns: '1fr 1fr' }}>
+              <h2>费用预算与管理</h2>
+              <div style={{ display: 'grid', gap: 12, gridTemplateColumns: '1fr 1fr' }}>
                 <div>
-                  <label>金额（元）</label>
-                  <input type="number" value={expAmount} onChange={(e) => setExpAmount(Number(e.target.value))} />
+                  <label>快速录入（中文，如：午餐 120 元 第2天）</label>
+                  <input value={expInput} onChange={(e) => setExpInput(e.target.value)} placeholder="示例：晚餐 85 元 第1天" />
+                  <button onClick={addExpenseFromText} style={{ marginTop: 8 }}>解析并记录</button>
                 </div>
                 <div>
-                  <label>分类</label>
-                  <select value={expCategory} onChange={(e) => setExpCategory(e.target.value as ExpenseCategory)}>
-                    <option value="transport">交通</option>
-                    <option value="accommodation">住宿</option>
-                    <option value="food">餐饮</option>
-                    <option value="tickets">门票</option>
-                    <option value="shopping">购物</option>
-                    <option value="other">其他</option>
-                  </select>
+                  <label>手动录入</label>
+                  <div style={{ display: 'grid', gap: 8, gridTemplateColumns: '1fr 1fr' }}>
+                    <div>
+                      <label>金额（元）</label>
+                      <input type="number" value={expAmount} onChange={(e) => setExpAmount(Number(e.target.value))} />
+                    </div>
+                    <div>
+                      <label>分类</label>
+                      <select value={expCategory} onChange={(e) => setExpCategory(e.target.value as ExpenseCategory)}>
+                        <option value="transport">交通</option>
+                        <option value="accommodation">住宿</option>
+                        <option value="food">餐饮</option>
+                        <option value="tickets">门票</option>
+                        <option value="shopping">购物</option>
+                        <option value="other">其他</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label>第几天（可选）</label>
+                      <input type="number" value={expDay ?? ''} onChange={(e) => setExpDay(e.target.value ? Number(e.target.value) : undefined)} />
+                    </div>
+                    <div>
+                      <label>备注（可选）</label>
+                      <input value={expNote} onChange={(e) => setExpNote(e.target.value)} placeholder="如：午餐、纪念品等" />
+                    </div>
+                    <div style={{ gridColumn: '1 / span 2' }}>
+                      <button onClick={addExpenseManual}>添加记录</button>
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <label>第几天（可选）</label>
-                  <input type="number" value={expDay ?? ''} onChange={(e) => setExpDay(e.target.value ? Number(e.target.value) : undefined)} />
-                </div>
-                <div>
-                  <label>备注（可选）</label>
-                  <input value={expNote} onChange={(e) => setExpNote(e.target.value)} placeholder="如：午餐、纪念品等" />
-                </div>
-                <div style={{ gridColumn: '1 / span 2' }}>
-                  <button onClick={addExpenseManual}>添加记录</button>
+
+                <div style={{ marginTop: 16 }}>
+                  <h3>费用汇总</h3>
+                  <p>已记录总额：¥{summary.total}</p>
+                  <p>剩余预算：¥{Math.max(0, input.budget - summary.total)}</p>
+                  <div style={{ display: 'grid', gap: 6, gridTemplateColumns: '1fr 1fr' }}>
+                    {Object.entries(summary.byCategory).map(([cat, amt]) => (
+                      <div key={cat}>{cat}：¥{amt}</div>
+                    ))}
+                  </div>
+                  <div style={{ marginTop: 8 }}>
+                    <button onClick={onAnalyzeBudget} disabled={analysisLoading}>{analysisLoading ? '分析中...' : 'AI 预算分析'}</button>
+                  </div>
+
+                  {analysis && (
+                    <div style={{ marginTop: 12, background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 8, padding: 12 }}>
+                      <strong>AI 分析结论</strong>
+                      <p style={{ marginTop: 6 }}>{analysis.overall}</p>
+                      <div style={{ marginTop: 8 }}>
+                        <strong>分类建议：</strong>
+                        {analysis.categories.map((c, idx) => (
+                          <p key={idx}>
+                            {({
+                              transport: '交通', accommodation: '住宿', food: '餐饮', tickets: '门票', shopping: '购物', other: '其他',
+                            } as Record<ExpenseCategory, string>)[c.category]}：已用 ¥{c.spent}；建议：{c.suggestion}
+                          </p>
+                        ))}
+                      </div>
+                      {analysis.daily && analysis.daily.length > 0 && (
+                        <div style={{ marginTop: 8 }}>
+                          <strong>每日提醒：</strong>
+                          {analysis.daily.map((d, idx) => (
+                            <p key={idx}>第 {d.day} 天：已用 ¥{d.spent ?? 0}，预估 ¥{d.estimated ?? 0}{d.warning ? `；提醒：${d.warning}` : ''}</p>
+                          ))}
+                        </div>
+                      )}
+                      {analysis.tips && analysis.tips.length > 0 && (
+                        <div style={{ marginTop: 8 }}>
+                          <strong>小贴士：</strong>
+                          <ul style={{ marginTop: 4 }}>
+                            {analysis.tips.map((t, i) => (<li key={i}>{t}</li>))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
 
             <div style={{ marginTop: 16 }}>
-              <h3>费用汇总</h3>
-              <p>已记录总额：¥{summary.total}</p>
-              <p>剩余预算：¥{Math.max(0, input.budget - summary.total)}</p>
-              <div style={{ display: 'grid', gap: 6, gridTemplateColumns: '1fr 1fr' }}>
-                {Object.entries(summary.byCategory).map(([cat, amt]) => (
-                  <div key={cat}>{cat}：¥{amt}</div>
-                ))}
-              </div>
-              <div style={{ marginTop: 8 }}>
-                <button onClick={onAnalyzeBudget} disabled={analysisLoading}>{analysisLoading ? '分析中...' : 'AI 预算分析'}</button>
-              </div>
-
-              {analysis && (
-                <div style={{ marginTop: 12, background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 8, padding: 12 }}>
-                  <strong>AI 分析结论</strong>
-                  <p style={{ marginTop: 6 }}>{analysis.overall}</p>
-                  <div style={{ marginTop: 8 }}>
-                    <strong>分类建议：</strong>
-                    {analysis.categories.map((c, idx) => (
-                      <p key={idx}>
-                        {({
-                          transport: '交通', accommodation: '住宿', food: '餐饮', tickets: '门票', shopping: '购物', other: '其他',
-                        } as Record<ExpenseCategory, string>)[c.category]}：已用 ¥{c.spent}；建议：{c.suggestion}
-                      </p>
-                    ))}
-                  </div>
-                  {analysis.daily && analysis.daily.length > 0 && (
-                    <div style={{ marginTop: 8 }}>
-                      <strong>每日提醒：</strong>
-                      {analysis.daily.map((d, idx) => (
-                        <p key={idx}>第 {d.day} 天：已用 ¥{d.spent ?? 0}，预估 ¥{d.estimated ?? 0}{d.warning ? `；提醒：${d.warning}` : ''}</p>
-                      ))}
-                    </div>
-                  )}
-                  {analysis.tips && analysis.tips.length > 0 && (
-                    <div style={{ marginTop: 8 }}>
-                      <strong>小贴士：</strong>
-                      <ul style={{ marginTop: 4 }}>
-                        {analysis.tips.map((t, i) => (<li key={i}>{t}</li>))}
-                      </ul>
-                    </div>
-                  )}
-                </div>
-              )}
+              <ItineraryView data={result} expenses={expenses} />
             </div>
-            </div>
-
-            <ItineraryView data={result} expenses={expenses} />
-          </section>
-        )}
-
-        {result && (
-          <section style={{ marginTop: 24 }}>
-            <h2>地图</h2>
-            <Map data={result} />
-          </section>
-        )}
+          </aside>
+          )}
+        </section>
+      )}
       </div>
     )
 }
