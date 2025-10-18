@@ -8,6 +8,8 @@ import Map from './components/Map'
 import { useSpeechRecognition } from './hooks/useSpeechRecognition'
 import { useXfyunIat } from './hooks/useXfyunIat'
 import { parseChineseExpense, aggregateExpenses } from './utils/expenses'
+import { initAuth, onAuthStateChanged, signIn, signUp, signOut } from './services/auth'
+import { initCloud, savePlan, listPlans, loadPlan, updatePlanExpenses, type PlanMeta } from './services/cloud'
 
 function App() {
   const [input, setInput] = useState<TripInput>({
@@ -24,6 +26,16 @@ function App() {
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<Itinerary | null>(null)
   const [expenses, setExpenses] = useState<Expense[]>([])
+  // 新增：用户与云端计划管理状态
+  const [user, setUser] = useState<{ uid: string; email: string | null } | null>(null)
+  const [plans, setPlans] = useState<PlanMeta[]>([])
+  const [currentPlanId, setCurrentPlanId] = useState<string | null>(null)
+  const [authEmail, setAuthEmail] = useState('')
+  const [authPassword, setAuthPassword] = useState('')
+  const [authLoading, setAuthLoading] = useState(false)
+  const [cloudLoading, setCloudLoading] = useState(false)
+  // 新增：认证错误提示
+  const [authError, setAuthError] = useState<string | null>(null)
   const [expInput, setExpInput] = useState('')
   const [expDay, setExpDay] = useState<number | undefined>(undefined)
   const [expCategory, setExpCategory] = useState<ExpenseCategory>('other')
@@ -36,6 +48,9 @@ function App() {
   const [activeDay, setActiveDay] = useState<number>(1)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const asrProvider = ((import.meta.env.VITE_ASR_PROVIDER as string | undefined)?.toLowerCase()) || 'web'
+  // 认证输入校验：邮箱格式与密码长度
+  const isEmailValid = useMemo(() => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(authEmail), [authEmail])
+  const canAuth = isEmailValid && (authPassword?.length || 0) >= 6
   const sr = useMemo(() => {
     if (asrProvider === 'xfyun') {
       return useXfyunIat({ lang: 'zh_cn' })
@@ -104,6 +119,7 @@ function App() {
     try {
       const data = await generateItinerary(input)
       setResult(data)
+      setCurrentPlanId(null)
       try {
         const text = await generateItineraryText({ input, itinerary: data })
         setLlmText(text)
@@ -162,9 +178,104 @@ function App() {
 
   const summary = aggregateExpenses(expenses)
 
+  useEffect(() => {
+    initAuth()
+    const unsub = onAuthStateChanged(async (u) => {
+      setUser(u ? { uid: u.uid, email: u.email } : null)
+      initCloud(u || null)
+      if (u) {
+        try {
+          const list = await listPlans()
+          setPlans(list)
+        } catch (e) {
+          console.warn('刷新云端计划失败', e)
+        }
+      } else {
+        setPlans([])
+        setCurrentPlanId(null)
+      }
+    })
+    return () => { unsub && unsub() }
+  }, [])
+
+  async function saveCurrentPlan() {
+    if (!user || !result) { alert('请先登录并生成行程'); return }
+    setCloudLoading(true)
+    try {
+      const id = await savePlan(result, input, expenses)
+      setCurrentPlanId(id)
+      const list = await listPlans()
+      setPlans(list)
+      alert('已保存到云端')
+    } catch (e) {
+      alert('保存失败，请稍后重试')
+      console.warn(e)
+    } finally {
+      setCloudLoading(false)
+    }
+  }
+
+  async function loadPlanById(id: string) {
+    setCloudLoading(true)
+    try {
+      const p = await loadPlan(id)
+      if (!p) { alert('未找到计划'); return }
+      setResult(p.itinerary)
+      if (p.input) setInput(p.input)
+      setExpenses(p.expenses || [])
+      setCurrentPlanId(id)
+    } catch (e) {
+      alert('加载失败，请稍后重试')
+      console.warn(e)
+    } finally {
+      setCloudLoading(false)
+    }
+  }
+
+  // 云同步：费用变化时自动同步到当前计划
+  useEffect(() => {
+    if (!user || !currentPlanId) return
+    updatePlanExpenses(currentPlanId, expenses).catch(e => console.warn('云同步费用失败', e))
+  }, [expenses, user, currentPlanId])
+
   return (
     <div style={{ padding: 16 }}>
       <h1>智能旅行规划</h1>
+      <div style={{ margin: '12px 0', padding: 12, border: '1px solid #e5e7eb', borderRadius: 8 }}>
+        <strong>用户管理与云同步</strong>
+        {!user ? (
+          <div style={{ display: 'grid', gap: 8, gridTemplateColumns: '1fr 1fr 1fr' }}>
+            <input placeholder="邮箱" value={authEmail} onChange={(e) => { setAuthEmail(e.target.value); setAuthError(null) }} />
+            <input placeholder="密码" type="password" value={authPassword} onChange={(e) => { setAuthPassword(e.target.value); setAuthError(null) }} />
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button disabled={authLoading || !canAuth} onClick={async () => { setAuthLoading(true); try { await signUp(authEmail, authPassword); setAuthError(null) } catch (e) { const msg = (e as Error)?.message || '注册失败'; setAuthError(msg) } finally { setAuthLoading(false) } }}>注册</button>
+              <button disabled={authLoading || !canAuth} onClick={async () => { setAuthLoading(true); try { await signIn(authEmail, authPassword); setAuthError(null) } catch (e) { const msg = (e as Error)?.message || '登录失败'; setAuthError(msg) } finally { setAuthLoading(false) } }}>登录</button>
+            </div>
+            {authError && (
+              <div style={{ gridColumn: '1 / span 3', color: '#dc2626' }}>{authError}</div>
+            )}
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gap: 8, gridTemplateColumns: '1fr 1fr' }}>
+            <div>当前用户：{user.email || user.uid}</div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button onClick={() => { signOut(); setAuthError(null) }}>退出登录</button>
+              <button onClick={async () => { setCloudLoading(true); try { const list = await listPlans(); setPlans(list) } finally { setCloudLoading(false) } }} disabled={cloudLoading}>{cloudLoading ? '刷新中...' : '刷新云端计划'}</button>
+              <button onClick={saveCurrentPlan} disabled={cloudLoading || !result}>{cloudLoading ? '保存中...' : '保存当前行程到云端'}</button>
+            </div>
+            <div style={{ gridColumn: '1 / span 2' }}>
+              <label>我的计划</label>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
+                {plans.map(p => (
+                  <button key={p.id} onClick={() => loadPlanById(p.id)} style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid #d1d5db', background: '#fff', cursor: 'pointer' }}>
+                    {p.title}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
       <section style={{ display: 'grid', gap: 12, gridTemplateColumns: '1fr 1fr' }}>
         <div>
           <label>目的地</label>
@@ -348,6 +459,7 @@ function App() {
       )}
       </div>
     )
+
 }
 
 export default App
