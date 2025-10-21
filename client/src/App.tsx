@@ -3,7 +3,7 @@ import './App.css'
 import { parseChineseTrip } from './utils/parseInput'
 import type { TripInput, Itinerary, Expense, ExpenseCategory, BudgetAnalysis } from './types'
 import ItineraryView from './components/ItineraryView'
-import { generateItinerary, analyzeBudget, generateItineraryText } from './services/llm'
+import { generateItinerary, analyzeBudget } from './services/llm'
 import Map from './components/Map'
 import { useSpeechRecognition } from './hooks/useSpeechRecognition'
 import { useXfyunIat } from './hooks/useXfyunIat'
@@ -46,7 +46,6 @@ function App() {
   // 新增：AI 预算分析状态
   const [analysis, setAnalysis] = useState<BudgetAnalysis | null>(null)
   const [analysisLoading, setAnalysisLoading] = useState(false)
-  const [llmText, setLlmText] = useState<string>('')
   const [activeDay, setActiveDay] = useState<number>(1)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const asrProvider = ((import.meta.env.VITE_ASR_PROVIDER as string | undefined)?.toLowerCase()) || 'web'
@@ -122,13 +121,6 @@ function App() {
       const data = await generateItinerary(input)
       setResult(data)
       setCurrentPlanId(null)
-      try {
-        const text = await generateItineraryText({ input, itinerary: data })
-        setLlmText(text)
-      } catch (e) {
-        console.warn('生成详细行程文本失败', e)
-        setLlmText('')
-      }
     } catch (e) {
       alert('生成失败，请稍后重试')
       console.warn(e)
@@ -140,6 +132,7 @@ function App() {
   function addExpenseFromText() {
     const parsed = parseChineseExpense(expInput)
     const newItem: Expense = {
+      id: (crypto as any)?.randomUUID ? (crypto as any).randomUUID() : String(Date.now()),
       amount: parsed.amount ?? 0,
       category: (parsed.category ?? 'other') as ExpenseCategory,
       day: parsed.day,
@@ -152,6 +145,7 @@ function App() {
 
   function addExpenseManual() {
     const newItem: Expense = {
+      id: (crypto as any)?.randomUUID ? (crypto as any).randomUUID() : String(Date.now()),
       amount: expAmount,
       category: expCategory,
       day: expDay,

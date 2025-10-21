@@ -16,19 +16,6 @@ export default function ItineraryView({ data, expenses }: { data: Itinerary, exp
     return ''
   }
 
-  // 新增：构造携程酒店搜索链接（城市+酒店关键词）
-  const buildCtripHotelLink = (_city?: string, _hotelName?: string) => {
-    // 已删除携程搜索链接功能，返回空字符串占位
-    return ''
-  }
-  // 新增：计算当晚预算在 UI 中的展示值
-  const computePerNightBudgetUI = (it: Itinerary, day: Itinerary['daysPlan'][number]) => {
-    const baseDaily = (day.totalEstimate && day.totalEstimate > 0) ? day.totalEstimate : Math.round(((it.budget || 0) / Math.max(it.days || 1, 1)) || 0)
-    let perNight = Math.round((baseDaily || 0) * 0.4)
-    if (!isFinite(perNight) || perNight <= 0) perNight = 300
-    return perNight
-  }
-
   return (
     <div style={{ marginTop: 24 }}>
       <h2>行程规划结果：{data.destination}（{data.days} 天）</h2>

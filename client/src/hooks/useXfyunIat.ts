@@ -123,7 +123,7 @@ export function useXfyunIat(options?: { lang?: string }) {
         } catch {}
       }
 
-      ws.onerror = (e) => {
+      ws.onerror = () => {
         state.error = 'WebSocket 错误或鉴权失败'
         state.listening = false
         notify()

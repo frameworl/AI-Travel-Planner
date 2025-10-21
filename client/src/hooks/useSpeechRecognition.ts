@@ -4,7 +4,7 @@ type Recognition = {
   interimResults: boolean
   start: () => void
   stop: () => void
-  onresult: (e: SpeechRecognitionEvent) => void
+  onresult: (e: any) => void
   onerror: (e: any) => void
 }
 
@@ -41,7 +41,7 @@ export function useSpeechRecognition(options?: { lang?: string }) {
     recognition.continuous = false
     recognition.interimResults = true
 
-    recognition.onresult = (event: SpeechRecognitionEvent) => {
+    recognition.onresult = (event: any) => {
       const res = event.results[event.resultIndex]
       if (res && res[0]) {
         state.transcript = res[0].transcript

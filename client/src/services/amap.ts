@@ -1,6 +1,6 @@
 // amap.ts - Enhance itinerary with Amap (Gaode) POIs
 
-import type { Itinerary, ItineraryDay as PlanDay, PlanItem, TransportSegment } from '../types';
+import type { Itinerary, ItineraryDay as PlanDay, PlanItem, TransportSegment, CandidatePlace } from '../types';
 
 export type AMapPoi = {
   id: string;

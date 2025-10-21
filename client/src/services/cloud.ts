@@ -1,7 +1,7 @@
 import type { TripInput, Itinerary, Expense } from '../types'
 import type { AuthUser } from './auth'
 import { initializeApp, getApps, getApp } from 'firebase/app'
-import { getFirestore, collection, addDoc, getDocs, getDoc, doc, setDoc, query, where, orderBy } from 'firebase/firestore'
+import { getFirestore, collection, getDocs, getDoc, doc, setDoc, query, where, orderBy } from 'firebase/firestore'
 
 export type PlanMeta = { id: string; title: string; destination: string; days: number; budget: number; updatedAt: number }
 export type LoadedPlan = { id: string; itinerary: Itinerary; input?: TripInput; expenses?: Expense[] }
