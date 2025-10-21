@@ -43,7 +43,56 @@
   - 地图与 POI 丰富需要 `VITE_AMAP_KEY` 且高德域名白名单需包含你的访问域名（例如 `localhost:8080`）。
 - 如需启用真实功能（地图/AI/云同步）：
   - 请使用 `Dockerfile` 通过 `--build-arg` 注入配置后重建镜像。
-  - 示例：`docker build -t ai-travel-planner:prod -f Dockerfile . --build-arg VITE_LLM_PROVIDER=dashscope --build-arg VITE_DASHSCOPE_API_KEY=sk-... --build-arg VITE_DASHSCOPE_MODEL=qwen2.5 --build-arg VITE_AMAP_KEY=你的JSAPIKey --build-arg VITE_AMAP_SECURITY_JS_CODE=... --build-arg VITE_FIREBASE_API_KEY=... --build-arg VITE_FIREBASE_AUTH_DOMAIN=... --build-arg VITE_FIREBASE_PROJECT_ID=... --build-arg VITE_FIREBASE_APP_ID=...`
+  - 示例：`docker build -t ai-travel-planner:prod -f Dockerfile . --build-arg VITE_LLM_PROVIDER=dashscope --build-arg VITE_DASHSCOPE_API_KEY=sk-... --build-arg VITE_DASHSCOPE_MODEL=qwen2.5 --build-arg VITE_AMAP_KEY=你的JSAPIKey --build-arg VITE_AMAP_SECURITY_JS_CODE=... --build-arg VITE_AMAP_REST_KEY=... --build-arg VITE_ASR_PROVIDER=xfyun --build-arg VITE_XFYUN_APP_ID=... --build-arg VITE_XFYUN_API_KEY=... --build-arg VITE_XFYUN_API_SECRET=... --build-arg VITE_FIREBASE_API_KEY=... --build-arg VITE_FIREBASE_AUTH_DOMAIN=... --build-arg VITE_FIREBASE_PROJECT_ID=... --build-arg VITE_FIREBASE_APP_ID=...`
+
+## 在 Docker 上使用你的 API 密钥（两种方式）
+- 方式 A：重建镜像并在构建期注入密钥（推荐）
+  - 准备好你的密钥（示例）：
+    - `VITE_LLM_PROVIDER=dashscope`，`VITE_DASHSCOPE_API_KEY`，`VITE_DASHSCOPE_MODEL`
+    - `VITE_AMAP_KEY`（Web 端 JS API Key，域名白名单需包含 `localhost` 或你的域名）
+    - `VITE_AMAP_SECURITY_JS_CODE`（如在高德开启安全策略则必填）
+    - `VITE_AMAP_REST_KEY`（可选，用于文本检索）
+    - 语音识别可选：`VITE_ASR_PROVIDER=xfyun` 与 `VITE_XFYUN_APP_ID`、`VITE_XFYUN_API_KEY`、`VITE_XFYUN_API_SECRET`
+    - 云端同步（可选 Firebase）：`VITE_FIREBASE_API_KEY`、`VITE_FIREBASE_AUTH_DOMAIN`、`VITE_FIREBASE_PROJECT_ID`、`VITE_FIREBASE_APP_ID`
+  - 构建命令示例：
+    - `docker build -t ai-travel-planner:prod -f Dockerfile . \`
+      `--build-arg VITE_LLM_PROVIDER=dashscope \`
+      `--build-arg VITE_DASHSCOPE_API_KEY=<你的key> \`
+      `--build-arg VITE_DASHSCOPE_MODEL=qwen2.5 \`
+      `--build-arg VITE_AMAP_KEY=<你的JSAPIKey> \`
+      `--build-arg VITE_AMAP_SECURITY_JS_CODE=<你的安全码> \`
+      `--build-arg VITE_AMAP_REST_KEY=<可选> \`
+      `--build-arg VITE_ASR_PROVIDER=xfyun \`
+      `--build-arg VITE_XFYUN_APP_ID=<appId> \`
+      `--build-arg VITE_XFYUN_API_KEY=<apiKey> \`
+      `--build-arg VITE_XFYUN_API_SECRET=<apiSecret> \`
+      `--build-arg VITE_FIREBASE_API_KEY=<apiKey> \`
+      `--build-arg VITE_FIREBASE_AUTH_DOMAIN=<domain> \`
+      `--build-arg VITE_FIREBASE_PROJECT_ID=<projectId> \`
+      `--build-arg VITE_FIREBASE_APP_ID=<appId>`
+  - 运行：`docker run -d -p 8080:80 --name ai-travel-planner ai-travel-planner:prod`
+  - 验证：访问 `http://localhost:8080/`（如端口占用，可改为 `-p 18080:80` 并访问 `http://localhost:18080/`）。
+
+- 方式 B：使用现有镜像 + 本地构建 + 覆盖静态文件
+  - 在 `client/.env` 中填入密钥（参考 `client/.env.example`），示例：
+    - `VITE_LLM_PROVIDER=dashscope`
+    - `VITE_DASHSCOPE_API_KEY=...`，`VITE_DASHSCOPE_MODEL=...`
+    - `VITE_AMAP_KEY=...`，`VITE_AMAP_SECURITY_JS_CODE=...`，`VITE_AMAP_REST_KEY=...`
+    - 可选语音识别与 Firebase 配置按需加入
+  - 本地构建：
+    - `cd client`
+    - `npm ci`
+    - `npm run build`
+  - 启动或确认容器运行：
+    - `docker run -d -p 8080:80 --name ai-travel-planner ai-travel-planner:prod`（如已运行可跳过）
+    - 查看状态：`docker ps --filter name=ai-travel-planner`
+  - 覆盖静态资源（Windows 示例路径）：
+    - `docker cp "c:\\Users\\<你>\\learn-git\\AI-Travel-Planner\\client\\dist\\." ai-travel-planner:/usr/share/nginx/html/`
+  - 刷新浏览器即可生效；无需重启 Nginx。若有缓存，清除后重试。
+  - 验证：
+    - PowerShell：`(Invoke-WebRequest -UseBasicParsing 'http://localhost:8080/').StatusCode` 返回 `200`
+    - 或浏览器直接访问首页并测试地图/AI/语音功能。
+  - 高德域名白名单：请在高德控制台将 `localhost`（或你的实际域名）加入白名单；启用安全策略时必须正确配置 `VITE_AMAP_SECURITY_JS_CODE`。
 
 ## 配置说明（.env）
 - LLM 提供商：
